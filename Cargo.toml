@@ -13,7 +13,7 @@ description = "A pure-Rust implementation of Bulletproofs using Ristretto"
 
 [dependencies]
 curve25519-dalek = { version = "0.18", features = ["serde"] }
-subtle = "0.6"
+subtle = "0.7"
 sha2 = "^0.7"
 rand = "0.5.0-pre.2"
 byteorder = "1.2.1"
@@ -33,3 +33,5 @@ avx2_backend = ["curve25519-dalek/avx2_backend"]
 name = "bulletproofs"
 harness = false
 
+[patch.crates-io]
+curve25519-dalek = { git = "https://github.com/hdevalence/curve25519-dalek", branch = "fallible-multiscalar-mul" }
