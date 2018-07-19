@@ -4,6 +4,7 @@ use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 use generators::PedersenGenerators;
 use std::iter::FromIterator;
+use proof_transcript::ProofTranscript;
 
 use circuit_proof::{Circuit, ProverInput, VerifierInput};
 
@@ -210,9 +211,19 @@ impl ConstraintSystem {
     	let m = self.var_assignment.len();
         let v_blinding: Vec<Scalar> = (0..m).map(|_| Scalar::random(rng)).collect();
 
+        self.create_proof_input_given_blinding(&v_blinding, pedersen_generators)
+    }
+
+    pub fn create_proof_input_given_blinding(
+        &self,
+        v_blinding: &Vec<Scalar>,
+        pedersen_generators: &PedersenGenerators,
+    ) -> (Circuit, ProverInput, VerifierInput) {
+    	assert!(v_blinding.len() == self.var_assignment.len());
+
     	let circuit = self.create_circuit();
-        let prover_input = self.create_prover_input(&v_blinding);
-        let verifier_input = self.create_verifier_input(&v_blinding, pedersen_generators);
+        let prover_input = self.create_prover_input(v_blinding);
+        let verifier_input = self.create_verifier_input(v_blinding, pedersen_generators);
 
         (circuit, prover_input, verifier_input)
     }
@@ -545,8 +556,8 @@ mod tests {
         assert!(create_and_verify_helper(circuit, prover_input, verifier_input).is_err());
     }
 
-    // Creates a 2 in 2 out shuffle circuit.
-    fn shuffle_circuit_helper(
+    // Creates a 2 in 2 out shuffle circuit with fixed challenges (insecure!)
+    fn shuffle_circuit_1_helper(
         in_0: Scalar,
         in_1: Scalar,
         out_0: Scalar,
@@ -582,22 +593,80 @@ mod tests {
     }
 
     #[test]
-    // Test that a 2 in 2 out shuffle circuit behaves as expected
-    fn shuffle_circuit() {
+    // Test that a 2 in 2 out shuffle circuit with fixed challenges behaves as expected
+    fn shuffle_circuit_1() {
         let three = Scalar::from_u64(3);
         let seven = Scalar::from_u64(7);
-        assert!(shuffle_circuit_helper(three, seven, three, seven).is_ok());
-        assert!(shuffle_circuit_helper(three, seven, seven, three).is_ok());
-        assert!(shuffle_circuit_helper(three, seven, seven, seven).is_err());
-        assert!(shuffle_circuit_helper(three, Scalar::one(), seven, three).is_err());
+        assert!(shuffle_circuit_1_helper(three, seven, three, seven).is_ok());
+        assert!(shuffle_circuit_1_helper(three, seven, seven, three).is_ok());
+        assert!(shuffle_circuit_1_helper(three, seven, seven, seven).is_err());
+        assert!(shuffle_circuit_1_helper(three, Scalar::one(), seven, three).is_err());
     }
 
-    // Creates a 2 in 2 out merge circuit.
+    // Creates a 2 in 2 out shuffle circuit with proof transcript generated challenges.
+    fn shuffle_circuit_2_helper(
+        in_0: Scalar,
+        in_1: Scalar,
+        out_0: Scalar,
+        out_1: Scalar,
+    ) -> Result<(), &'static str> {
+        let mut rng = OsRng::new().unwrap();
+        let pedersen_generators = PedersenGenerators::default();
+        let mut cs = ConstraintSystem::new();
+
+        let v_blinding: Vec<Scalar> = (0..5).map(|_| Scalar::random(&mut rng)).collect();
+        let V: Vec<RistrettoPoint> = vec![in_0, in_1, out_0, out_1]
+            .iter()
+            .zip(v_blinding.clone())
+            .map(|(v_i, v_blinding_i)| pedersen_generators.commit(*v_i, v_blinding_i))
+            .collect();
+        let mut transcript = ProofTranscript::new(b"ShuffleCircuitTest");
+        for V_i in V {
+        	transcript.commit(V_i.compress().as_bytes());
+        }
+        let rand = transcript.challenge_scalar();
+
+        let var_in_0 = cs.alloc_variable(in_0);
+        let var_in_1 = cs.alloc_variable(in_1);
+        let var_out_0 = cs.alloc_variable(out_0);
+        let var_out_1 = cs.alloc_variable(out_1);
+        let var_mul = cs.alloc_variable((in_0 - rand) * (in_1 - rand));
+
+        // lc_0: (var_in_0 - z) * (var_in_1 - z) = var_mul
+        let lc_0_a = LinearCombination::construct(vec![(var_in_0, Scalar::one())], -rand);
+        let lc_0_b = LinearCombination::construct(vec![(var_in_1, Scalar::one())], -rand);
+        let lc_0_c =
+            LinearCombination::construct(vec![(var_mul.clone(), Scalar::one())], Scalar::zero());
+        assert!(cs.push_lc(lc_0_a, lc_0_b, lc_0_c).is_ok());
+
+        // lc_1: (var_out_0 - z) * (var_out_1 - z) = var_mul
+        let lc_1_a = LinearCombination::construct(vec![(var_out_0, Scalar::one())], -rand);
+        let lc_1_b = LinearCombination::construct(vec![(var_out_1, Scalar::one())], -rand);
+        let lc_1_c = LinearCombination::construct(vec![(var_mul, Scalar::one())], Scalar::zero());
+        assert!(cs.push_lc(lc_1_a, lc_1_b, lc_1_c).is_ok());
+
+        let (circuit, prover_input, verifier_input) =
+            cs.create_proof_input_given_blinding(&v_blinding, &pedersen_generators);
+        create_and_verify_helper(circuit, prover_input, verifier_input)
+    }
+
+    #[test]
+    // Test that a 2 in 2 out shuffle circuit with proof transcript generated challenges behaves as expected
+    fn shuffle_circuit_2() {
+        let three = Scalar::from_u64(3);
+        let seven = Scalar::from_u64(7);
+        assert!(shuffle_circuit_2_helper(three, seven, three, seven).is_ok());
+        assert!(shuffle_circuit_2_helper(three, seven, seven, three).is_ok());
+        assert!(shuffle_circuit_2_helper(three, seven, seven, seven).is_err());
+        assert!(shuffle_circuit_2_helper(three, Scalar::one(), seven, three).is_err());
+    }
+
+    // Creates a 2 in 2 out merge circuit with fixed challenges (insecure!)
     // (Is equivalent to a split circuit if you switch inputs and outputs.)
     // Either the assets are unaltered: ￥30 + $42 = ￥30 + $42
     // Or the assets are merged. This is allowed when:
     // the types are the same, the asset values are merged into out_1, and out_0 is zero: $30 + $42 = $0 + $72
-    fn merge_circuit_helper(
+    fn merge_circuit_1_helper(
         type_0: Scalar,
         type_1: Scalar,
         val_in_0: Scalar,
@@ -649,7 +718,8 @@ mod tests {
     }
 
     #[test]
-    fn merge_circuit() {
+    // Test that a 2 in 2 out merge circuit with fixed challenges behaves as expected
+    fn merge_circuit_1() {
         let buck = Scalar::from_u64(32);
         let yuan = Scalar::from_u64(86);
         let a = Scalar::from_u64(24);
@@ -657,11 +727,11 @@ mod tests {
         let a_plus_b = Scalar::from_u64(100);
         let zero = Scalar::zero();
 
-        assert!(merge_circuit_helper(buck, buck, a, a, a, a).is_ok());
-        assert!(merge_circuit_helper(buck, buck, a, b, zero, a_plus_b).is_ok());
-        assert!(merge_circuit_helper(buck, yuan, a, b, a, b).is_ok());
-        assert!(merge_circuit_helper(buck, buck, a, b, a, a_plus_b).is_err());
-        assert!(merge_circuit_helper(buck, yuan, a, b, zero, a_plus_b).is_err());
-        assert!(merge_circuit_helper(buck, buck, a, b, zero, zero).is_err());
+        assert!(merge_circuit_1_helper(buck, buck, a, a, a, a).is_ok());
+        assert!(merge_circuit_1_helper(buck, buck, a, b, zero, a_plus_b).is_ok());
+        assert!(merge_circuit_1_helper(buck, yuan, a, b, a, b).is_ok());
+        assert!(merge_circuit_1_helper(buck, buck, a, b, a, a_plus_b).is_err());
+        assert!(merge_circuit_1_helper(buck, yuan, a, b, zero, a_plus_b).is_err());
+        assert!(merge_circuit_1_helper(buck, buck, a, b, zero, zero).is_err());
     }
 }
