@@ -4,16 +4,16 @@
 //! For more explanation of how the `dealer`, `party`, and `messages` modules orchestrate the protocol execution, see
 //! [the API for the aggregated multiparty computation protocol](../aggregation/index.html#api-for-the-aggregated-multiparty-computation-protocol).
 
-use rand::{CryptoRng, Rng};
-
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
+use merlin::Transcript;
+use rand::{CryptoRng, Rng};
 
 use errors::MPCError;
 use generators::Generators;
 use inner_product_proof;
-use proof_transcript::ProofTranscript;
 use range_proof::RangeProof;
+use transcript::TranscriptExt;
 
 use util;
 
@@ -28,7 +28,7 @@ impl Dealer {
         gens: &'b Generators,
         n: usize,
         m: usize,
-        transcript: &'a mut ProofTranscript,
+        transcript: &'a mut Transcript,
     ) -> Result<DealerAwaitingValueCommitments<'a, 'b>, MPCError> {
         if !(n == 8 || n == 16 || n == 32 || n == 64) {
             return Err(MPCError::InvalidBitsize);
@@ -70,10 +70,10 @@ impl Dealer {
 pub struct DealerAwaitingValueCommitments<'a, 'b> {
     n: usize,
     m: usize,
-    transcript: &'a mut ProofTranscript,
+    transcript: &'a mut Transcript,
     /// The dealer keeps a copy of the initial transcript state, so
     /// that it can attempt to verify the aggregated proof at the end.
-    initial_transcript: ProofTranscript,
+    initial_transcript: Transcript,
     gens: &'b Generators,
 }
 
@@ -89,15 +89,15 @@ impl<'a, 'b> DealerAwaitingValueCommitments<'a, 'b> {
 
         // Commit each V_j individually
         for vc in value_commitments.iter() {
-            self.transcript.commit(vc.V_j.compress().as_bytes());
+            self.transcript.commit_point(&vc.V_j.compress());
         }
 
         let A: RistrettoPoint = value_commitments.iter().map(|vc| vc.A_j).sum();
         let S: RistrettoPoint = value_commitments.iter().map(|vc| vc.S_j).sum();
 
         // Commit aggregated A_j, S_j
-        self.transcript.commit(A.compress().as_bytes());
-        self.transcript.commit(S.compress().as_bytes());
+        self.transcript.commit_point(&A.compress());
+        self.transcript.commit_point(&S.compress());
 
         let y = self.transcript.challenge_scalar();
         let z = self.transcript.challenge_scalar();
@@ -123,8 +123,8 @@ impl<'a, 'b> DealerAwaitingValueCommitments<'a, 'b> {
 pub struct DealerAwaitingPolyCommitments<'a, 'b> {
     n: usize,
     m: usize,
-    transcript: &'a mut ProofTranscript,
-    initial_transcript: ProofTranscript,
+    transcript: &'a mut Transcript,
+    initial_transcript: Transcript,
     gens: &'b Generators,
     value_challenge: ValueChallenge,
     value_commitments: Vec<ValueCommitment>,
@@ -147,8 +147,8 @@ impl<'a, 'b> DealerAwaitingPolyCommitments<'a, 'b> {
         let T_1: RistrettoPoint = poly_commitments.iter().map(|pc| pc.T_1_j).sum();
         let T_2: RistrettoPoint = poly_commitments.iter().map(|pc| pc.T_2_j).sum();
 
-        self.transcript.commit(T_1.compress().as_bytes());
-        self.transcript.commit(T_2.compress().as_bytes());
+        self.transcript.commit_point(&T_1.compress());
+        self.transcript.commit_point(&T_2.compress());
 
         let x = self.transcript.challenge_scalar();
         let poly_challenge = PolyChallenge { x };
@@ -177,8 +177,8 @@ impl<'a, 'b> DealerAwaitingPolyCommitments<'a, 'b> {
 pub struct DealerAwaitingProofShares<'a, 'b> {
     n: usize,
     m: usize,
-    transcript: &'a mut ProofTranscript,
-    initial_transcript: ProofTranscript,
+    transcript: &'a mut Transcript,
+    initial_transcript: Transcript,
     gens: &'b Generators,
     value_challenge: ValueChallenge,
     value_commitments: Vec<ValueCommitment>,
@@ -205,9 +205,9 @@ impl<'a, 'b> DealerAwaitingProofShares<'a, 'b> {
         let t_x_blinding: Scalar = proof_shares.iter().map(|ps| ps.t_x_blinding).sum();
         let e_blinding: Scalar = proof_shares.iter().map(|ps| ps.e_blinding).sum();
 
-        self.transcript.commit(t_x.as_bytes());
-        self.transcript.commit(t_x_blinding.as_bytes());
-        self.transcript.commit(e_blinding.as_bytes());
+        self.transcript.commit_scalar(&t_x);
+        self.transcript.commit_scalar(&t_x_blinding);
+        self.transcript.commit_scalar(&e_blinding);
 
         // Get a challenge value to combine statements for the IPP
         let w = self.transcript.challenge_scalar();

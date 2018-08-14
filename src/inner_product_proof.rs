@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-
 #![doc(include = "../docs/inner-product-protocol.md")]
 
 use std::borrow::Borrow;
@@ -8,10 +7,10 @@ use std::iter;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::VartimeMultiscalarMul;
-
-use proof_transcript::ProofTranscript;
+use merlin::Transcript;
 
 use errors::ProofError;
+use transcript::TranscriptExt;
 
 #[derive(Clone, Debug)]
 pub struct InnerProductProof {
@@ -34,7 +33,7 @@ impl InnerProductProof {
     /// The lengths of the vectors must all be the same, and must all be
     /// either 0 or a power of 2.
     pub fn create<I>(
-        verifier: &mut ProofTranscript,
+        transcript: &mut Transcript,
         Q: &RistrettoPoint,
         Hprime_factors: I,
         mut G_vec: Vec<RistrettoPoint>,
@@ -98,10 +97,10 @@ impl InnerProductProof {
             L_vec.push(L.compress());
             R_vec.push(R.compress());
 
-            verifier.commit(L.compress().as_bytes());
-            verifier.commit(R.compress().as_bytes());
+            transcript.commit_point(&L.compress());
+            transcript.commit_point(&R.compress());
 
-            let u = verifier.challenge_scalar();
+            let u = transcript.challenge_scalar();
             let u_inv = u.invert();
 
             for i in 0..n {
@@ -129,7 +128,7 @@ impl InnerProductProof {
     /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
     pub(crate) fn verification_scalars(
         &self,
-        transcript: &mut ProofTranscript,
+        transcript: &mut Transcript,
     ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
         let lg_n = self.L_vec.len();
         let n = 1 << lg_n;
@@ -138,8 +137,8 @@ impl InnerProductProof {
 
         let mut challenges = Vec::with_capacity(lg_n);
         for (L, R) in self.L_vec.iter().zip(self.R_vec.iter()) {
-            transcript.commit(L.as_bytes());
-            transcript.commit(R.as_bytes());
+            transcript.commit_point(L);
+            transcript.commit_point(R);
             challenges.push(transcript.challenge_scalar());
         }
 
@@ -181,7 +180,7 @@ impl InnerProductProof {
     #[allow(dead_code)]
     pub fn verify<I>(
         &self,
-        transcript: &mut ProofTranscript,
+        transcript: &mut Transcript,
         Hprime_factors: I,
         P: &RistrettoPoint,
         Q: &RistrettoPoint,
@@ -362,7 +361,7 @@ mod tests {
             G.iter().chain(H.iter()).chain(iter::once(&Q)),
         );
 
-        let mut verifier = ProofTranscript::new(b"innerproducttest");
+        let mut verifier = Transcript::new(b"innerproducttest");
         let proof = InnerProductProof::create(
             &mut verifier,
             &Q,
@@ -373,7 +372,7 @@ mod tests {
             b.clone(),
         );
 
-        let mut verifier = ProofTranscript::new(b"innerproducttest");
+        let mut verifier = Transcript::new(b"innerproducttest");
         assert!(
             proof
                 .verify(&mut verifier, util::exp_iter(y_inv), &P, &Q, &G, &H)
@@ -381,7 +380,7 @@ mod tests {
         );
 
         let proof = InnerProductProof::from_bytes(proof.to_bytes().as_slice()).unwrap();
-        let mut verifier = ProofTranscript::new(b"innerproducttest");
+        let mut verifier = Transcript::new(b"innerproducttest");
         assert!(
             proof
                 .verify(&mut verifier, util::exp_iter(y_inv), &P, &Q, &G, &H)
