@@ -13,7 +13,7 @@ use errors::MPCError;
 use generators::Generators;
 use inner_product_proof;
 use range_proof::RangeProof;
-use transcript::TranscriptExt;
+use transcript::TranscriptProtocol;
 
 use util;
 

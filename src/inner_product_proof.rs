@@ -10,7 +10,7 @@ use curve25519_dalek::traits::VartimeMultiscalarMul;
 use merlin::Transcript;
 
 use errors::ProofError;
-use transcript::TranscriptExt;
+use transcript::TranscriptProtocol;
 
 #[derive(Clone, Debug)]
 pub struct InnerProductProof {

@@ -13,7 +13,7 @@ use merlin::Transcript;
 use errors::ProofError;
 use generators::Generators;
 use inner_product_proof::InnerProductProof;
-use transcript::TranscriptExt;
+use transcript::TranscriptProtocol;
 use util;
 
 use serde::de::Visitor;

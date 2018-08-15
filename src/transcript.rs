@@ -1,18 +1,18 @@
-//! Defines a `TranscriptExt` trait for using a Merlin transcript.
+//! Defines a `TranscriptProtocol` trait for using a Merlin transcript.
 
 use byteorder::{ByteOrder, LittleEndian};
 use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::scalar::Scalar;
 use merlin::Transcript;
 
-pub trait TranscriptExt {
+pub trait TranscriptProtocol {
     fn commit_u64(&mut self, value: u64);
     fn commit_scalar(&mut self, scalar: &Scalar);
     fn commit_point(&mut self, point: &CompressedRistretto);
     fn challenge_scalar(&mut self) -> Scalar;
 }
 
-impl TranscriptExt for Transcript {
+impl TranscriptProtocol for Transcript {
     fn commit_u64(&mut self, value: u64) {
         let mut value_bytes = [0u8; 8];
         LittleEndian::write_u64(&mut value_bytes, value);
